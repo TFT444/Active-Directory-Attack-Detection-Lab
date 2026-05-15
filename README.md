@@ -44,8 +44,13 @@ This is not a theoretical exercise — every attack was executed manually, every
 └─────────────────────────────────────────────────────┘
 ```
 
-**Domain:** `soclab.local`
-**Domain Controller:** `WIN-E7QTOMF7GC8`
+**Domain:** `soclab.local` | **Domain Controller:** `WIN-E7QTOMF7GC8`
+
+### Lab Setup
+
+![VirtualBox Lab](VirtualBox.png)
+
+![Server Manager](Server%20Manager%20Dashboard.png)
 
 ---
 
@@ -79,7 +84,6 @@ This is not a theoretical exercise — every attack was executed manually, every
 ## ⚔️ Attack Phases & Detection
 
 ### Attack 1 — Password Spraying
-
 **MITRE ATT&CK:** T1110.003 — Brute Force: Password Spraying
 
 **What happened:**
@@ -90,7 +94,7 @@ Using NetExec, a single common password (`Password123!`) was sprayed across all 
 netexec smb 192.168.1.10 -u tfarhad zsiraji sjones jsmith -p Password123!
 ```
 
-**Result:** All accounts returned `STATUS_LOGON_FAILURE` — confirming the attack ran and generated Windows Security logs.
+![Password Spraying](Attack%201%20—%20Password%20Spraying.png)
 
 **Splunk Detection Query (SPL):**
 ```spl
@@ -100,18 +104,15 @@ index=* EventCode=4625
 | sort -count
 ```
 
-**Evidence:**
-- 217 failed login events (EventCode 4625) captured
-- All 4 domain accounts targeted confirmed in Splunk
-- Automated alert created: triggers when any account exceeds 10 failed logins
+![Splunk Password Spray Detection](Search%201%20—%20Splunk%20Password%20Spray%20Detection.png)
 
-**What a SOC analyst would do:**
-Isolate the source IP, check if it's internal or external, correlate with VPN/firewall logs, and escalate to Tier 2 if the source is unknown.
+**Evidence:** 217 failed login events (EventCode 4625) captured. All 4 domain accounts targeted confirmed in Splunk. Automated alert created: triggers when any account exceeds 10 failed logins.
+
+**SOC Response:** Isolate the source IP, check if internal or external, correlate with VPN/firewall logs, escalate to Tier 2 if source is unknown.
 
 ---
 
 ### Attack 2 — Kerberoasting
-
 **MITRE ATT&CK:** T1558.003 — Steal or Forge Kerberos Tickets: Kerberoasting
 
 **What happened:**
@@ -122,7 +123,7 @@ Using Impacket's GetUserSPNs tool, Service Principal Names (SPNs) were enumerate
 impacket-GetUserSPNs soclab.local/jsmith:Password123! -dc-ip 192.168.1.10 -request
 ```
 
-**Result:** SPN enumeration successful. Identified `jsmith` (Domain Admin, CN=Domain Admins) with registered service account.
+![Kerberoasting](Attack%202%20—%20Kerberoasting.png)
 
 **Key finding:**
 ```
@@ -138,13 +139,11 @@ index=* EventCode=4769 Ticket_Encryption_Type=0x17
 | sort -count
 ```
 
-**What a SOC analyst would do:**
-Flag any RC4-encrypted Kerberos ticket requests (0x17) as suspicious — modern environments should use AES encryption. Investigate the requesting account and correlate with other suspicious activity.
+**SOC Response:** Flag RC4-encrypted Kerberos ticket requests (0x17) as suspicious. Modern environments should use AES. Investigate the requesting account and correlate with other suspicious activity.
 
 ---
 
 ### Attack 3 — NTDS Hash Dump (Credential Access)
-
 **MITRE ATT&CK:** T1003.003 — OS Credential Dumping: NTDS
 
 **What happened:**
@@ -154,6 +153,8 @@ Using Domain Admin credentials obtained via password spraying, the entire NTDS.d
 ```bash
 netexec smb 192.168.1.10 -u administrator -p Password123! --ntds
 ```
+
+![NTDS Hash Dump](Attack%203%20—%20NTDS%20Hash%20Dump.png)
 
 **Result: 9 NTDS hashes dumped successfully:**
 
@@ -178,7 +179,6 @@ index=* EventCode=4662
 ---
 
 ### Attack 4 — Lateral Movement
-
 **MITRE ATT&CK:** T1021.002 — Remote Services: SMB/Windows Admin Shares
 
 **What happened:**
@@ -189,7 +189,7 @@ Using administrator credentials, remote command execution was achieved on the Wi
 netexec smb 192.168.1.20 -u administrator -p Password123! -x "whoami"
 ```
 
-**Result:** Remote code execution confirmed on victim workstation `SOC-LAB`.
+![Lateral Movement](Attack%204%20—%20Lateral%20Movement.png)
 
 **Splunk Detection Query (SPL):**
 ```spl
@@ -199,10 +199,11 @@ index=* EventCode=4624 Logon_Type=3
 | sort -count
 ```
 
+![Splunk Successful Logins](Search%202%20—%20Splunk%20Successful%20Logins.png)
+
 ---
 
 ### Attack 5 — Pass the Hash
-
 **MITRE ATT&CK:** T1550.002 — Use Alternate Authentication Material: Pass the Hash
 
 **What happened:**
@@ -213,14 +214,18 @@ Using the NTLM hash dumped in Attack 3, authentication was achieved against the 
 netexec smb 192.168.1.10 -u administrator -H aad3b435b51404eeaad3b435b51404ee:2b576acbe6bcfda7294d6bd18041b8fe
 ```
 
+![Pass the Hash](Attack%205%20—%20Pass%20the%20Hash.png)
+
 **Result: `(Pwn3d!)` — Domain Controller fully compromised.**
 
 **Splunk Detection Query (SPL):**
 ```spl
-index=* EventCode=4624 Logon_Type=3 
+index=* EventCode=4624 Logon_Type=3
 | search NOT src_ip="192.168.1.*"
 | table _time, Account_Name, src_ip, Workstation_Name
 ```
+
+![Splunk All Security Events](Search%203%20—%20Splunk%20All%20Security%20Events.png)
 
 ---
 
@@ -234,9 +239,7 @@ index=* EventCode=4624 Logon_Type=3
 | Lateral Movement | T1021.002 | 4624 | ✅ Yes | ✅ Yes |
 | Pass the Hash | T1550.002 | 4624 | ✅ Yes | ✅ Yes |
 
-**Total events captured:** 4,354+
-**Failed login attempts detected:** 217
-**Password hashes dumped:** 9
+**Total events captured:** 4,354+ | **Failed login attempts detected:** 217 | **Password hashes dumped:** 9
 
 ---
 
@@ -277,7 +280,6 @@ index=* EventCode=4624 Logon_Type=3
 - Splunk Universal Forwarder
 
 ### Network Configuration
-All VMs connected via VirtualBox **Internal Network** (`soclab-network`):
 
 | VM | IP | Role |
 |----|----|----|
@@ -297,7 +299,7 @@ All VMs connected via VirtualBox **Internal Network** (`soclab-network`):
 ### Splunk Configuration
 1. Install Splunk Enterprise on host PC
 2. Enable receiving on port 9997
-3. Install Splunk on Windows Server, configure forwarding to host
+3. Configure forwarding from Windows Server to host
 4. Install Splunk Universal Forwarder on Windows 10
 5. Configure Windows Event Log monitoring (Security, System, Application, DNS)
 
@@ -305,34 +307,6 @@ All VMs connected via VirtualBox **Internal Network** (`soclab-network`):
 ```cmd
 Sysmon64.exe -accepteula -i
 sc query Sysmon
-```
-
----
-
-## 📁 Repository Structure
-
-```
-Active-Directory-Attack-Detection-Lab/
-├── README.md
-├── screenshots/
-│   ├── attacks/
-│   │   ├── 01-password-spray.png
-│   │   ├── 02-kerberoasting.png
-│   │   ├── 03-ntds-dump.png
-│   │   ├── 04-lateral-movement.png
-│   │   └── 05-pass-the-hash-pwn3d.png
-│   ├── detections/
-│   │   ├── splunk-4625-events.png
-│   │   ├── splunk-account-stats.png
-│   │   └── splunk-4624-logins.png
-│   └── lab-setup/
-│       ├── active-directory-users.png
-│       ├── server-manager-dashboard.png
-│       └── virtualbox-vms-running.png
-├── splunk-queries/
-│   └── detection-queries.spl
-└── incident-report/
-    └── incident-report.md
 ```
 
 ---
